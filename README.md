@@ -1,4 +1,4 @@
-# classifier — Apple Quality Classifier
+# classifier: Apple Quality Classifier
 
 Grades apples as good or bad from a photograph, entirely in the browser. A
 Vision Transformer fine-tuned for binary classification runs client-side through
@@ -9,7 +9,10 @@ Part of the [project-demos](https://github.com/Shubin123/project-demos) collecti
 
 ## Status: ⚠️ Partly working
 
-The apple classifier works and is fully local — TensorFlow.js is the only external request. The optional YOLO11m segmentation branch is unfinished, which the page states in its own UI. Note also the shard-caching bug under *Known limitations*: it 404s on shards 1–9 every run, though the model still loads.
+The apple classifier works and is fully local; TensorFlow.js is the only
+external request. The optional YOLO11m segmentation branch is unfinished, which
+the page states in its own UI. Note also the shard-caching bug under *Known
+limitations*: it 404s on shards 1-9 every run, though the model still loads.
 
 *Verified 2026-08-20 by requesting every external dependency this project uses over the network. The demo itself was not opened in a browser, so this reflects dependency health rather than a full functional test.*
 
@@ -17,7 +20,9 @@ The apple classifier works and is fully local — TensorFlow.js is the only exte
 
 [![Demo recording](demo/preview.png)](demo/preview.mp4)
 
-*A recording of the demo running. Click through to [`demo/preview.mp4`](demo/preview.mp4) to play it — worth keeping because it shows the demo working regardless of whether the live version still does.*
+*A recording of the demo running. Click through to
+[`demo/preview.mp4`](demo/preview.mp4) to play it; worth keeping because it
+shows the demo working regardless of whether the live version still does.*
 
 
 ## What it does
@@ -36,22 +41,22 @@ maps. Detections are filtered with `tf.image.nonMaxSuppressionAsync`, and
 objectness is combined with class scores before thresholding. Tensors are
 explicitly released with `tf.dispose` after each pass.
 
-Note that the page labels this path as incomplete in its own UI — *"does not
-fully work with this site"* — so treat the segmentation branch as experimental.
+Note that the page labels this path as incomplete in its own UI (*"does not
+fully work with this site"*) so treat the segmentation branch as experimental.
 The apple classifier is the working feature.
 
 ## Models
 
 | Directory | Size | Shards | Used | What it is |
 | --- | --- | --- | --- | --- |
-| `binary_classification_model/` | 328 MB | 82 | yes | The apple classifier — a fine-tuned ViT, converted to a TF.js graph model |
+| `binary_classification_model/` | 328 MB | 82 | yes | The apple classifier, a fine-tuned ViT, converted to a TF.js graph model |
 | `yolo11m-seg_web_model/` | 86 MB | 22 | optional | YOLO11m segmentation, loaded when the checkbox is ticked |
 | `object_detection_model/` | 22 MB | 6 | **no** | Not referenced anywhere in `index.html` |
 
-Total repository size is roughly **437 MB**. No individual file exceeds 4 MB —
-TensorFlow.js splits weights into 4 MB shards — so everything is committed as
-ordinary git objects with no Git LFS involved. Cloning transfers the full
-437 MB.
+Total repository size is roughly **437 MB**. No individual file exceeds 4 MB
+(TensorFlow.js splits weights into 4 MB shards) so everything is committed as
+ordinary git objects with no Git LFS involved. Cloning transfers the full 437
+MB.
 
 ### Weight caching
 
@@ -64,25 +69,26 @@ loading display.
 
 ### The dataset
 
-The classifier was fine-tuned on the
-[**Fresh and Rotten Fruits Dataset for Machine-Based Evaluation of Fruit
+The classifier was fine-tuned on the [**Fresh and Rotten Fruits Dataset for
+Machine-Based Evaluation of Fruit
 Quality**](https://data.mendeley.com/datasets/bdd69gyhv8/1), published on
-Mendeley Data. It is not redistributed here — download it from that link.
+Mendeley Data. It is not redistributed here, download it from that link.
 
 Both training scripts expect it preprocessed into `./resized_apples/`, laid out
 for `ImageFolder` / `flow_from_directory`: one subdirectory per class (bad and
 good apples), with images already resized to 224×224.
 
-### `finetune.py` — the approach that shipped
+### `finetune.py`: the approach that shipped
 
-Fine-tunes [`google/vit-base-patch16-224-in21k`](https://huggingface.co/google/vit-base-patch16-224-in21k)
+Fine-tunes
+[`google/vit-base-patch16-224-in21k`](https://huggingface.co/google/vit-base-patch16-224-in21k)
 with PyTorch and Hugging Face Transformers for 2-class output. It loads local
 pre-trained weights from `pytorch_model.bin`, deleting `classifier.weight` and
-`classifier.bias` from the state dict first — those have the wrong shape once
-`num_labels` changes — and loading the rest with `strict=False`. Images are
+`classifier.bias` from the state dict first (those have the wrong shape once
+`num_labels` changes) and loading the rest with `strict=False`. Images are
 normalised with the standard ImageNet statistics and optimised with Adam.
 
-### `trainfromscratch.py` — the baseline
+### `trainfromscratch.py`: the baseline
 
 Trains a small Keras CNN from scratch on the same data for comparison, with
 aggressive augmentation (50° rotation, 0.4 shift and zoom, 0.3 shear, horizontal
@@ -113,29 +119,30 @@ python -m http.server 8000
 # then open http://localhost:8000/
 ```
 
-Expect a slow first load — 328 MB of weights before the first prediction, or
-414 MB with the YOLO model enabled. Subsequent loads are served from IndexedDB.
+Expect a slow first load: 328 MB of weights before the first prediction, or 414
+MB with the YOLO model enabled. Subsequent loads are served from IndexedDB.
 
 ## Known limitations
 
 - **The shard cache loop requests filenames that do not exist.** `loadModel`
   builds paths with `String(i).padStart(2, '0')`, producing
-  `group1-shard01of82.bin`, but TensorFlow.js emits **unpadded** names —
-  `group1-shard1of82.bin`. Shards 1 through 9 therefore 404 on every run and are
-  never cached. The demo still works, because `tf.loadGraphModel` has already
-  fetched the weights itself via `model.json` before this loop runs; the loop is
-  a supplementary caching and progress layer. Removing the `padStart` fixes it.
-- **`object_detection_model/` is dead weight** — 22 MB that no code path loads.
+  `group1-shard01of82.bin`, but TensorFlow.js emits **unpadded** names:
+  `group1-shard1of82.bin`. Shards 1 through 9 therefore 404 on every run and
+  are never cached. The demo still works, because `tf.loadGraphModel` has
+  already fetched the weights itself via `model.json` before this loop runs;
+  the loop is a supplementary caching and progress layer. Removing the
+  `padStart` fixes it.
+- **`object_detection_model/` is dead weight**, 22 MB that no code path loads.
 - **The training dataset is absent.** Both scripts hard-code `./resized_apples/`,
   and `finetune.py` also expects a local `pytorch_model.bin`. Neither is in the
   repository. The source data is obtainable from the Mendeley link above, but it
   still needs resizing into the expected layout, so the scripts are a record of
   method rather than something that runs unmodified.
 - **The YOLO11m segmentation path is incomplete**, as the page itself states.
-  It loads and runs, but the post-processing is not finished — which is also why
+  It loads and runs, but the post-processing is not finished; which is also why
   a large block of alternative post-processing sits commented out.
-- **437 MB is a lot for a git repository.** GitHub accepts it — no single file is
-  near the 100 MB cap — but it is well above the size where clones stay
+- **437 MB is a lot for a git repository.** GitHub accepts it (no single file
+  is near the 100 MB cap) but it is well above the size where clones stay
   comfortable. Quantising the classifier, or converting it to a TF.js *layers*
   model with 16-bit weights, would cut this substantially.
 - The checkbox label in `index.html` contains an empty `<a>` element, so the
@@ -152,5 +159,5 @@ Expect a slow first load — 328 MB of weights before the first prediction, or
 - Segmentation model: [YOLO11](https://docs.ultralytics.com/models/yolo11/) by Ultralytics
 
 Ultralytics YOLO models are AGPL-3.0 licensed unless covered by a commercial
-licence — worth checking before reusing the segmentation weights in anything
+licence: worth checking before reusing the segmentation weights in anything
 distributed.
