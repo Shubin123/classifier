@@ -23,6 +23,10 @@ maps. Detections are filtered with `tf.image.nonMaxSuppressionAsync`, and
 objectness is combined with class scores before thresholding. Tensors are
 explicitly released with `tf.dispose` after each pass.
 
+Note that the page labels this path as incomplete in its own UI — *"does not
+fully work with this site"* — so treat the segmentation branch as experimental.
+The apple classifier is the working feature.
+
 ## Models
 
 | Directory | Size | Shards | Used | What it is |
@@ -45,10 +49,16 @@ loading display.
 
 ## Training
 
-Both scripts that produced the classifier are included. They expect a dataset
-directory `./resized_apples/` laid out for `ImageFolder` / `flow_from_directory`
-— one subdirectory per class (bad and good apples), images already resized to
-224×224. **That dataset is not in this repository**; supply your own.
+### The dataset
+
+The classifier was fine-tuned on the
+[**Fresh and Rotten Fruits Dataset for Machine-Based Evaluation of Fruit
+Quality**](https://data.mendeley.com/datasets/bdd69gyhv8/1), published on
+Mendeley Data. It is not redistributed here — download it from that link.
+
+Both training scripts expect it preprocessed into `./resized_apples/`, laid out
+for `ImageFolder` / `flow_from_directory`: one subdirectory per class (bad and
+good apples), with images already resized to 224×224.
 
 ### `finetune.py` — the approach that shipped
 
@@ -105,14 +115,29 @@ Expect a slow first load — 328 MB of weights before the first prediction, or
 - **`object_detection_model/` is dead weight** — 22 MB that no code path loads.
 - **The training dataset is absent.** Both scripts hard-code `./resized_apples/`,
   and `finetune.py` also expects a local `pytorch_model.bin`. Neither is in the
-  repository, so the scripts are a record of method rather than something you can
-  run unmodified.
+  repository. The source data is obtainable from the Mendeley link above, but it
+  still needs resizing into the expected layout, so the scripts are a record of
+  method rather than something that runs unmodified.
+- **The YOLO11m segmentation path is incomplete**, as the page itself states.
+  It loads and runs, but the post-processing is not finished — which is also why
+  a large block of alternative post-processing sits commented out.
 - **437 MB is a lot for a git repository.** GitHub accepts it — no single file is
   near the 100 MB cap — but it is well above the size where clones stay
   comfortable. Quantising the classifier, or converting it to a TF.js *layers*
   model with 16-bit weights, would cut this substantially.
-- A large block of alternative segmentation post-processing is left commented out
-  at the bottom of `index.html`.
+- The checkbox label in `index.html` contains an empty `<a>` element, so the
+  intended link to the [YOLO11 docs](https://docs.ultralytics.com/models/yolo11/)
+  renders as nothing clickable.
 - `ViTFeatureExtractor` is instantiated in `finetune.py` but the transforms are
   then done manually with `torchvision`, so the extractor is unused. It is also
   deprecated in current Transformers releases in favour of `ViTImageProcessor`.
+
+## Credits
+
+- Base model: [`google/vit-base-patch16-224-in21k`](https://huggingface.co/google/vit-base-patch16-224-in21k)
+- Dataset: [Fresh and Rotten Fruits Dataset for Machine-Based Evaluation of Fruit Quality](https://data.mendeley.com/datasets/bdd69gyhv8/1) (Mendeley Data)
+- Segmentation model: [YOLO11](https://docs.ultralytics.com/models/yolo11/) by Ultralytics
+
+Ultralytics YOLO models are AGPL-3.0 licensed unless covered by a commercial
+licence — worth checking before reusing the segmentation weights in anything
+distributed.
