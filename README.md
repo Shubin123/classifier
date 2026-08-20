@@ -7,6 +7,19 @@ fruit in the frame first.
 
 Part of the [webgl](https://github.com/Shubin123/webgl) demo collection.
 
+## Status: ⚠️ Partly working
+
+The apple classifier works and is fully local — TensorFlow.js is the only external request. The optional YOLO11m segmentation branch is unfinished, which the page states in its own UI. Note also the shard-caching bug under *Known limitations*: it 404s on shards 1–9 every run, though the model still loads.
+
+*Verified 2026-08-20 by requesting every external dependency this project uses over the network. The demo itself was not opened in a browser, so this reflects dependency health rather than a full functional test.*
+
+## Demo
+
+[![Demo recording](demo/preview.png)](demo/preview.mp4)
+
+*A recording of the demo running. Click through to [`demo/preview.mp4`](demo/preview.mp4) to play it — worth keeping because it shows the demo working regardless of whether the live version still does.*
+
+
 ## What it does
 
 Upload one or more images and press **Predict**. Each image is:
