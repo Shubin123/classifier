@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TensorFlow.js Model Inference</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
+    <style>
+        
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f7f9fc;
+            color: #333;
+            text-align: center;
+            margin: 1; /* Removes default margin to make the border fit snugly */
+            padding: 10px;
+            box-sizing: border-box; /* Ensures padding doesn’t affect the width */
+            border: 5px dashed black; /* Adjust thickness as needed */
+        }
+
+        h1 {
+            font-size: 2.5em;
+            color: #4caf50;
+        }
+
+        h3, h4 {
+        color: #616060;
+        font-weight: normal;
+        margin-top: 2px;
+        margin-bottom: 1px;
+        }
+        h2 {
+        color: #000000;
+        font-weight: normal;
+        margin-top: 10px;
+        margin-bottom: 80px;
+        }
+
+        p {
+            color: #000000;
+            font-weight: bold;
+            font-size: large;
+            margin-top: 60px;
+            margin-bottom: 60px;
+        }
+
+        #imageUpload {
+            margin-top: 20px;
+            padding: 10px;
+            border: 2px dashed #4caf50;
+            border-radius: 8px;
+            background-color: #fff;
+            cursor: pointer;
+            transition: 0.3s;
+        }
+
+        #imageUpload:hover {
+            background-color: #f1f1f1;
+        }
+
+        #predictButton {
+            margin-top: 20px;
+            padding: 10px 20px;
+            font-size: 1em;
+            color: #fff;
+            background-color: #4caf50;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: 0.3s;
+        }
+
+        #predictButton:disabled {
+            background-color: #a5d6a7;
+            cursor: not-allowed;
+        }
+
+        #results {
+            margin-top: 30px;
+            font-size: 1.2em;
+            color: #333;
+        }
+
+        #loading {
+            display: none;
+            font-size: 1.2em;
+            color: #555;
+            margin-top: 20px;
+        }
+
+        #progressBarContainer {
+            width: 100%;
+            background: #e0e0e0;
+            border-radius: 8px;
+            overflow: hidden;
+            margin-top: 10px;
+            height: 20px;
+        }
+
+        #progressBar {
+            height: 100%;
+            width: 0%;
+            background: #4caf50;
+            transition: width 0.3s ease;
+        }
+
+        h5#checkboxText{
+            margin-left: 2em;
+  display: block;
+  position: relative;
+  margin-top: 5em;  /* make this margin match whatever your line-height is */
+  line-height: 1.4em;  /* can be set here, or elsewehere */
+        }
+    </style>
+</head>
+<body>
+    <h2>Automation and Robotics group B Apple Grade Classification</h2>
+    <h1>🍏 Apple Classifier 🍎</h1>
+    <h3>Based on <a href="https://huggingface.co/google/vit-base-patch16-224-in21k">google/vit-base-patch16-224-in21k</a> model.</h3>
+    <div>
+    <h3>Fine-tuned from <a href="https://data.mendeley.com/datasets/bdd69gyhv8/1">Fresh and Rotten Fruits Dataset for Machine-Based Evaluation of Fruit Quality</a> dataset.</h3>
+    <p id="hideAfterLoadLol">Loading the model may take a few minutes. Please be patient.</p> 
+</div>
+    <div id="loading">
+        Loading model... <span id="progress">0%</span>
+        <div id="progressBarContainer">
+            <div id="progressBar"></div>
+        </div>
+    </div>
+
+    <input type="file" id="imageUpload" accept="image/*" multiple>
+    <button id="predictButton" disabled>⁉️ Predict ⁉️</button>
+    <h5 id="checkboxText">Load secondary model (yoloV11 <a href="https://docs.ultralytics.com/models/yolo11/"></a> does not fully work with this site)</h5>
+    <input type="checkbox" id="loadSecondary">
+    <div id="results"></div>
+    
+    <script>
+       let appleModel, yoloModel;
+
+// IndexedDB setup for caching
+const dbName = 'modelCache';
+let db;
+const loadSecondary = document.getElementById("loadSecondary")
+async function openDatabase() {
+    return new Promise((resolve, reject) => {
+        const request = indexedDB.open(dbName, 1);
+        request.onupgradeneeded = function(event) {
+            const db = event.target.result;
+            db.createObjectStore('weights', { keyPath: 'fileName' });
+        };
+        request.onsuccess = function(event) {
+            db = event.target.result;
+            resolve(db);
+        };
+        request.onerror = function(event) {
+            reject('Database error: ' + event.target.errorCode);
+        };
+    });
+}
+
+async function storeWeight(fileName, blob) {
+    const transaction = db.transaction('weights', 'readwrite');
+    const store = transaction.objectStore('weights');
+    store.put({ fileName, blob });
+    return new Promise((resolve, reject) => {
+        transaction.oncomplete = resolve;
+        transaction.onerror = reject;
+    });
+}
+
+async function getWeight(fileName) {
+    return new Promise((resolve, reject) => {
+        const transaction = db.transaction('weights', 'readonly');
+        const store = transaction.objectStore('weights');
+        const request = store.get(fileName);
+        request.onsuccess = function(event) {
+            resolve(event.target.result ? event.target.result.blob : null);
+        };
+        request.onerror = reject;
+    });
+}
+
+async function loadModel(modelType) {
+    document.getElementById('loading').style.display = 'block'; // Show loading message
+    const totalFiles = modelType === 'apple' ? 82 : 22; // 82 for apple model, 6 for YOLOv11m
+    const basePath = modelType === 'apple' ? './binary_classification_model/' : './yolo11m-seg_web_model/';
+    let loadedFiles = 0;
+
+    // Open the database
+    await openDatabase();
+
+    // Load model metadata
+    try {
+        if (modelType === 'apple') {
+            appleModel = await tf.loadGraphModel(`${basePath}model.json`);
+            console.log('Apple model loaded successfully');
+        } else if (modelType === 'yolo') {
+            yoloModel = await tf.loadGraphModel(`${basePath}model.json`);
+            console.log('YOLO model loaded successfully');
+        }
+    } catch (error) {
+        console.error('Error loading model metadata:', error);
+        document.getElementById('loading').innerText = error;
+        return;
+    }
+
+    // Load each weight file with caching logic
+    for (let i = 1; i <= totalFiles; i++) {
+        const filePath = `${basePath}group1-shard${String(i).padStart(2, '0')}of${totalFiles}.bin`;
+        try {
+            const cachedBlob = await getWeight(filePath);
+            if (cachedBlob) {
+                console.log(`Loaded from cache: ${filePath}`);
+                await loadWeightFromBlob(cachedBlob);
+                loadedFiles++;
+            } else {
+                const response = await fetch(filePath);
+                const blob = await response.blob();
+                await storeWeight(filePath, blob);
+                await loadWeightFromBlob(blob);
+                loadedFiles++;
+            }
+            updateProgress(loadedFiles, totalFiles); // Update progress
+        } catch (error) {
+            console.error(`Failed to load ${filePath}:`, error);
+        }
+    }
+
+    console.log('All weight files attempted for loading');
+    document.getElementById('hideAfterLoadLol').style.display = 'none'; // Hide loading message
+    document.getElementById('predictButton').disabled = false; // Enable the predict button
+}
+
+function updateProgress(loaded, total) {
+    const percentage = Math.round((loaded / total) * 100);
+    document.getElementById('progress').innerText = `${percentage}%`;
+    document.getElementById('progressBar').style.width = `${percentage}%`;
+}
+
+async function loadWeightFromBlob(blob) {
+    // Here you would implement logic to use the blob to load weights into your model.
+    console.log('Weight loaded from blob', blob);
+}
+
+document.getElementById('predictButton').addEventListener('click', async () => {
+    const fileInput = document.getElementById('imageUpload');
+    const files = fileInput.files;
+
+    if (files.length > 0) {
+        const imageElements = [];
+        for (const file of files) {
+            const imageElement = document.createElement('img');
+            imageElement.src = URL.createObjectURL(file);
+            imageElements.push(imageElement);
+        }
+        await Promise.all(imageElements.map(img => new Promise(resolve => {
+            img.onload = resolve;
+        })));
+
+        // Perform prediction based on classifier confidence
+        await predictBasedOnConfidence(imageElements);
+    }
+});
+
+async function predictBasedOnConfidence(images) {
+    const resultsDiv = document.getElementById('results');
+    resultsDiv.innerHTML = '';  // Clear previous results
+
+    for (const imageElement of images) {
+        // Create a container for this image result
+        const containerDiv = document.createElement('div');
+        containerDiv.style.marginBottom = '20px';
+        resultsDiv.appendChild(containerDiv);
+
+        // Add the original image
+        containerDiv.appendChild(imageElement);
+
+        // Create canvas for YOLO predictions
+        const canvas = document.createElement('canvas');
+        canvas.width = imageElement.width;
+        canvas.height = imageElement.height;
+        containerDiv.appendChild(canvas);
+
+        try {
+            // Predict using the Apple classifier first
+            const applePrediction = await predictApple(imageElement);
+            console.log(applePrediction.confidence);
+
+            // Check if the confidence score is high enough for the Apple classifier
+            if (applePrediction.confidence >= 0.3 || !loadSecondary.checked) {
+                // If high confidence, show the apple classification result
+                displayAppleResult(containerDiv, applePrediction, imageElement);
+                // Remove the canvas since we're not using YOLO
+                canvas.remove();
+            } else {
+                // If confidence is low, fallback to YOLO prediction
+                await predictYolo(imageElement, canvas);
+            }
+        } catch (error) {
+            console.error('Prediction error:', error);
+            const errorDiv = document.createElement('div');
+            errorDiv.style.color = 'red';
+            errorDiv.textContent = `Error processing image: ${error.message}`;
+            containerDiv.appendChild(errorDiv);
+        }
+    }
+}
+
+// Helper function to display Apple classifier results
+function displayAppleResult(container, prediction, imageElement) {
+    const resultDiv = document.createElement('div');
+    resultDiv.innerHTML = `
+        <p>Classification: ${prediction.class}</p>
+        <p>Confidence: ${(prediction.confidence * 100).toFixed(2)}%</p>
+    `;
+    container.appendChild(resultDiv);
+}
+
+async function predictApple(imageElement) {
+    const img = tf.browser.fromPixels(imageElement);
+    const resized = tf.image.resizeBilinear(img, [224, 224]).div(255.0).expandDims(0);
+    const inputTensor = resized.transpose([0, 3, 1, 2]);  // Change to [1, 3, 224, 224]
+
+    const predictions = appleModel.predict(inputTensor);
+    const logits = await predictions.array(); // Get raw logits
+    const softmaxPredictions = tf.softmax(predictions).arraySync(); // Apply softmax
+
+    const predictedClass = tf.argMax(predictions, -1).dataSync()[0];
+    const confidenceScores = softmaxPredictions[0];
+    const confidence = confidenceScores[predictedClass];
+
+    return { label: predictedClass === 1 ? "Good Apple" : "Bad Apple", confidence };
+}
+
+function displayAppleResult(resultsDiv, prediction, imageElement) {
+    const imgElement = document.createElement('img');
+    imgElement.src = imageElement.src;
+    imgElement.style.width = '150px'; // Set a fixed width for display
+
+    resultsDiv.appendChild(imgElement);
+    resultsDiv.appendChild(document.createTextNode(`${prediction.label} (Confidence: ${(prediction.confidence * 100).toFixed(2)}%)`));
+    resultsDiv.appendChild(document.createElement('br')); // Line break
+}
+
+const names = ['normal', 'cracked', 'molded', 'wrinkled'];
+
+
+async function predictYolo(imageElement, canvasElement) {  // Add canvas parameter
+    if (!canvasElement || !canvasElement.getContext) {
+        throw new Error('Valid canvas element is required');
+    }
+
+    // Step 1: Preprocess the image
+    const img = tf.browser.fromPixels(imageElement);
+    const resized = tf.image.resizeBilinear(img, [640, 640])
+        .div(255.0)
+        .expandDims(0); // Normalize and add batch dimension
+
+    try {
+        if (loadSecondary.checked){
+        // Step 2: Run the model prediction
+        const predictions = await yoloModel.execute(resized);
+        
+        // Get the feature maps from both outputs
+        const featureMap1 = predictions[0];  // Shape: [1, 160, 160, 32]
+        const featureMap2 = predictions[1];  // Second feature map
+        
+        // Convert feature maps to detection boxes
+        const gridSize = 160;
+        const cellSize = 640 / gridSize;
+        
+        // Process the feature maps
+        const featureMap1Data = await featureMap1.dataSync();
+        const boxes = [];
+        const scores = [];
+        const classes = [];
+        
+        // Process each grid cell
+        for (let y = 0; y < gridSize; y++) {
+            for (let x = 0; x < gridSize; x++) {
+                const baseIdx = (y * gridSize + x) * 32;
+                
+                const tx = featureMap1Data[baseIdx];
+                const ty = featureMap1Data[baseIdx + 1];
+                const tw = featureMap1Data[baseIdx + 2];
+                const th = featureMap1Data[baseIdx + 3];
+                const confidence = featureMap1Data[baseIdx + 4];
+                
+                const classScores = featureMap1Data.slice(baseIdx + 5, baseIdx + 32);
+                const maxClassScore = Math.max(...classScores);
+                const classIndex = classScores.indexOf(maxClassScore);
+                
+                if (confidence > 0.25) { // Lowered threshold for testing
+                    const px = (x + tx) * cellSize;
+                    const py = (y + ty) * cellSize;
+                    const pw = Math.exp(tw) * cellSize;
+                    const ph = Math.exp(th) * cellSize;
+                    
+                    const x1 = Math.max(0, px - pw/2);
+                    const y1 = Math.max(0, py - ph/2);
+                    const x2 = Math.min(640, px + pw/2);
+                    const y2 = Math.min(640, py + ph/2);
+                    
+                    boxes.push([x1, y1, x2, y2]);
+                    scores.push(confidence * maxClassScore);
+                    classes.push(classIndex);
+                }
+            }
+        }
+        
+        // Apply NMS
+        const selectedIndices = await tf.image.nonMaxSuppressionAsync(
+            tf.tensor2d(boxes),
+            tf.tensor1d(scores),
+            100,  // Max number of boxes
+            0.45  // IOU threshold
+        );
+        
+        const selectedIndexesArray = await selectedIndices.array();
+        
+        // Set canvas size to match image
+        canvasElement.width = imageElement.width || 640;
+        canvasElement.height = imageElement.height || 640;
+        const ctx = canvasElement.getContext('2d');
+        
+        // Clear canvas and draw original image
+        ctx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+        ctx.drawImage(imageElement, 0, 0, canvasElement.width, canvasElement.height);
+        
+        // Draw boxes
+        selectedIndexesArray.forEach(i => {
+            const [x1, y1, x2, y2] = boxes[i];
+            const score = scores[i];
+            const classId = classes[i];
+            const label = `${names[classId] || 'Unknown'}: ${score.toFixed(2)}`;
+            
+            // Scale coordinates to match original image
+            const scaleX = canvasElement.width / 640;
+            const scaleY = canvasElement.height / 640;
+            
+            // Draw box
+            ctx.strokeStyle = '#00FFFF';
+            ctx.lineWidth = 4;
+            ctx.strokeRect(
+                x1 * scaleX,
+                y1 * scaleY,
+                (x2 - x1) * scaleX,
+                (y2 - y1) * scaleY
+            );
+            
+            // Draw label
+            ctx.font = '16px Arial';
+            ctx.fillStyle = '#00FFFF';
+            const textWidth = ctx.measureText(label).width;
+            const textHeight = 16;
+            ctx.fillRect(
+                x1 * scaleX,
+                y1 * scaleY - textHeight,
+                textWidth + 4,
+                textHeight + 4
+            );
+            
+            ctx.fillStyle = '#000000';
+            ctx.fillText(
+                label,
+                x1 * scaleX + 2,
+                y1 * scaleY - 2
+            );
+        });
+        
+        // Cleanup
+        tf.dispose([predictions, featureMap1, featureMap2, selectedIndices, img, resized]);
+    }
+
+    } catch (error) {
+        console.error('Prediction error:', error);
+        console.error('Error details:', error.stack);
+        throw error;
+    }
+}
+
+// Helper function to compute confidence scores
+function computeConfidenceScores(boxes, classScores) {
+  // If confidence scores are not part of the model output, calculate them
+  const objectnessScores = boxes.slice([0, 0, 0, 0], [1, boxes.shape[1], boxes.shape[2], 1]); // Extract objectness score (first element of boxes)
+  return tf.mul(objectnessScores, classScores); // Multiply objectness score by class scores
+}
+
+// async function predictYolo(imageElement, resultsDiv) {
+//     const img = tf.browser.fromPixels(imageElement);
+//     const resized = tf.image.resizeBilinear(img, [640, 640]).div(255.0).expandDims(0);  // Resize to 640x640
+
+//     const predictions = await yoloModel.predict(resized);  // Get YOLO predictions
+//     console.log("Predictions:", predictions);  // Log predictions shape
+
+//     if (!predictions || predictions.length !== 2) {
+//         console.error('Invalid predictions format:', predictions);
+//         return;
+//     }
+
+//     const boxes = predictions[0];  // Bounding boxes [x1, y1, x2, y2]
+//     const classScoresAndConf = predictions[1];  // Class scores and confidence
+
+//     console.log("Boxes Shape:", boxes.shape);  // Log the shape of the bounding boxes tensor
+//     console.log("Class Scores Shape:", classScoresAndConf.shape);  // Log the shape of the class scores tensor
+
+//     // Resize class scores to match bounding box grid (160x160)
+//     const resizedClassScores = tf.image.resizeBilinear(classScoresAndConf, [160, 160]);
+//     console.log("Resized Class Scores Shape:", resizedClassScores.shape);
+
+//     // Extract confidence scores and class scores from resized class scores tensor
+//     const confidenceScores = resizedClassScores.slice([0, 0, 0], [1, 160, 1]);  // Confidence scores
+//     const classScores = resizedClassScores.slice([0, 0, 1], [1, 160, -1]);  // Class scores
+
+//     console.log("Confidence Scores Shape:", confidenceScores.shape);  // Log the shape of the confidence tensor
+//     console.log("Class Scores Shape:", classScores.shape);  // Log the shape of the class scores tensor
+
+//     const numDetections = boxes.shape[1];  // Number of detections
+//     console.log("Number of Detections:", numDetections);  // Log number of detections
+
+//     const threshold = 0.5;
+//     for (let i = 0; i < numDetections; i++) {
+//         const score = confidenceScores.arraySync()[0][i];
+//         if (score > threshold) {
+//             const box = boxes.arraySync()[0][i];  // Bounding box
+//             const [x1, y1, x2, y2] = box;
+
+//             // Process class scores
+//             const classId = tf.argMax(classScores.slice([0, i], [1, 1]), -1).dataSync()[0];
+//             const classConfidence = classScores.arraySync()[0][i][classId];
+
+//             resultsDiv.appendChild(document.createTextNode(`Class ID: ${classId} (Confidence: ${(score * 100).toFixed(2)}%)`));
+//             resultsDiv.appendChild(document.createElement('br'));
+//         }
+//     }
+// }
+
+
+// Load models
+loadModel('apple');  // Load the Apple classifier model
+// loadModel('yolo');   // Load the YOLOv11m segmentation model
+
+    </script>
+</body>
+</html>

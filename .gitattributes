@@ -1,0 +1,6 @@
+# TensorFlow.js weight shards and model binaries must never be touched by
+# line-ending conversion.
+*.bin binary
+*.h5  binary
+*.pb  binary
+*.onnx binary
