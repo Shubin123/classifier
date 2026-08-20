@@ -5,7 +5,7 @@ Vision Transformer fine-tuned for binary classification runs client-side through
 TensorFlow.js, with an optional YOLO11m segmentation model for locating the
 fruit in the frame first.
 
-Part of the [webgl](https://github.com/Shubin123/webgl) demo collection.
+Part of the [project-demos](https://github.com/Shubin123/project-demos) collection.
 
 ## Status: ⚠️ Partly working
 
